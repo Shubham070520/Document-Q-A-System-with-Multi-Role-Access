@@ -12,7 +12,7 @@ router = APIRouter(prefix="/documents", tags=["Documents"])
 
 class ShareRequest(BaseModel):
     document_id: str
-    target_email: str
+    user_id: str
 
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
@@ -191,7 +191,7 @@ async def share_document(
                 # list_users returns an object that has user details
                 users_list = getattr(users_res, "users", []) or users_res
                 for u in users_list:
-                    if getattr(u, "email", None) == payload.target_email:
+                    if getattr(u, "email", None) == payload.user_id:
                         target_user_id = getattr(u, "id", None)
                         break
         except Exception:
@@ -200,12 +200,12 @@ async def share_document(
         # If not found via email lookup, check if input is a valid UUID user ID directly
         if not target_user_id:
             try:
-                uuid.UUID(payload.target_email)
-                target_user_id = payload.target_email
+                uuid.UUID(payload.user_id)
+                target_user_id = payload.user_id
             except ValueError:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Target user not found with email/id: {payload.target_email}"
+                    detail=f"Target user not found with email/id: {payload.user_id}"
                 )
 
         if target_user_id == current_user["id"]:
@@ -223,7 +223,7 @@ async def share_document(
 
 
         return {
-            "message": f"Document shared successfully with {payload.target_email}",
+            "message": f"Document shared successfully with {payload.user_id}",
             "shared_with": target_user_id
         }
     except HTTPException:
