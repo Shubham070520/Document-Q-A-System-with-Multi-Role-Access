@@ -127,9 +127,12 @@ The sharing pipeline allows both Admins and Standard Users to share access. Howe
 Follow these steps in **Swagger UI** to test the complete lifecycle:
 
 ### Step 1: Upload a Document (Admin)
-1.  Authorize using `dummy-admin-token`.
+1.  Authorize using `dummy-admin-token` *(or your real Admin JWT Access Token)*.
 2.  Go to `POST /api/v1/documents/upload` and select a `.txt` or `.pdf` file. 
-3.  *(Optional)* Set `target_user_id` to `00000000-0000-0000-0000-000000000001` to assign it directly to User 2, or leave it blank to remain owned by the Admin.
+3.  *(Optional)* Assign ownership to a standard user:
+    *   **Mock Token**: Set `target_user_id` to `00000000-0000-0000-0000-000000000001` (User 2).
+    *   **Real Token**: Set `target_user_id` to your standard user's UUID (e.g. `5281c32e-46e0-40de-8f20-9b3b2db32a3c`).
+    *   *Note: Leave it empty if you want the Admin to own the file.*
 4.  Execute. The API will immediately return `202 Accepted` with a `document_id`.
 
 ### Step 2: Check Processing Status
@@ -142,13 +145,18 @@ Follow these steps in **Swagger UI** to test the complete lifecycle:
 
 ### Step 4: Share Document Access
 1.  Go to `POST /api/v1/documents/share`.
-2.  Set `document_id` to your uploaded document, and `target_email` to the user's UUID `00000000-0000-0000-0000-000000000001`.
-3.  Execute.
+2.  Set `document_id` to your uploaded document.
+3.  Set `target_email` to the recipient:
+    *   **Mock Token**: Set `target_email` to `00000000-0000-0000-0000-000000000001`.
+    *   **Real Token**: Set `target_email` to the user's email address (e.g., `user@example.com`) or their raw user UUID directly.
+4.  Execute.
 
 ### Step 5: Query as the Standard User
-1.  Logout of Swagger. Authorize using `dummy-token`.
+1.  Click **Authorize** at the top right of Swagger, click **Logout**, then log back in:
+    *   **Mock Token**: Authorize using `dummy-token`.
+    *   **Real Token**: Authorize using your standard user's real JWT Access Token.
 2.  Go to `POST /api/v1/qa/query` and ask the same question.
-3.  Verify the standard user can now search and retrieve answers from the shared document.
+3.  Verify the standard user can now search and retrieve answers from the shared document, proving that Row Level Security (RLS) is working correctly!
 
 ---
 
