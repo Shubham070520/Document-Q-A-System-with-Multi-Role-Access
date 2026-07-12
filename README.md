@@ -109,6 +109,19 @@ For testing real user isolation and RLS checks in production:
 
 ---
 
+## 🔗 Peer-to-Peer (P2P) Document Sharing
+
+The sharing pipeline allows both Admins and Standard Users to share access. However, security checks differ based on roles:
+
+1.  **Admin Sharing**:
+    *   Administrators have permission to share **any** document in the database with any user.
+2.  **Standard User Sharing**:
+    *   Standard users can **only** share documents they own.
+    *   When a standard user calls `POST /api/v1/documents/share`, the database Row Level Security evaluates `public.is_document_owner(document_id)`.
+    *   If they are the owner, the share is written to `document_shares` and access is granted. Otherwise, it is rejected.
+
+---
+
 ## 📖 Step-by-Step Pipeline Walkthrough
 
 Follow these steps in **Swagger UI** to test the complete lifecycle:
