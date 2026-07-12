@@ -88,6 +88,22 @@ BEGIN
 END;
 $$;
 
+-- Security Helper Function to check document ownership (Avoids RLS circular dependency loops)
+CREATE OR REPLACE FUNCTION public.is_document_owner(doc_id UUID)
+RETURNS BOOLEAN
+SECURITY DEFINER
+SET search_path = public
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.documents
+    WHERE id = doc_id AND user_id = (SELECT auth.uid())
+  );
+END;
+$$;
+
+
 -- Enable RLS on all tables
 ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
@@ -170,33 +186,20 @@ CREATE POLICY "Read document shares policy"
 ON public.document_shares FOR SELECT
 USING (
     shared_with_user_id = (SELECT auth.uid())
-    OR EXISTS (
-        SELECT 1 FROM public.documents d
-        WHERE d.id = document_shares.document_id
-        AND d.user_id = (SELECT auth.uid())
-    )
     OR public.is_admin()
 );
 
 CREATE POLICY "Insert document shares policy"
 ON public.document_shares FOR INSERT
 WITH CHECK (
-    EXISTS (
-        SELECT 1 FROM public.documents d
-        WHERE d.id = document_shares.document_id
-        AND d.user_id = (SELECT auth.uid())
-    )
+    public.is_document_owner(document_id)
     OR public.is_admin()
 );
 
 CREATE POLICY "Delete document shares policy"
 ON public.document_shares FOR DELETE
 USING (
-    EXISTS (
-        SELECT 1 FROM public.documents d
-        WHERE d.id = document_shares.document_id
-        AND d.user_id = (SELECT auth.uid())
-    )
+    public.is_document_owner(document_id)
     OR public.is_admin()
 );
 
