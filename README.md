@@ -53,6 +53,9 @@ Fill in the configuration parameters in `.env`:
 ### 3. Initialize Database Schemas & RLS:
 Open the **Supabase SQL Editor** and execute the contents of [docs/schema_migration.sql](file:///d:/Programming/Assignment/docs/schema_migration.sql). This will set up the target tables, indexes, and custom Row Level Security policies.
 
+> [!IMPORTANT]
+> You must run the `docs/schema_migration.sql` script once in the Supabase SQL Editor to set up the tables, functions, and security policies before the server can read and write data. The server does not automatically create tables at startup.
+
 ### 4. Create Virtual Environment & Install Dependencies:
 ```bash
 python -m venv venv
@@ -149,9 +152,9 @@ Follow these steps in **Swagger UI** to test the complete lifecycle:
 ### Step 4: Share Document Access
 1.  Go to `POST /api/v1/documents/share`.
 2.  Set `document_id` to your uploaded document.
-3.  Set `target_email` to the recipient:
-    *   **Mock Token**: Set `target_email` to `00000000-0000-0000-0000-000000000001`.
-    *   **Real Token**: Set `target_email` to the user's email address (e.g., `user@example.com`) or their raw user UUID directly.
+3.  Set `user_id` to the recipient:
+    *   **Mock Token**: Set `user_id` to `00000000-0000-0000-0000-000000000001`.
+    *   **Real Token**: Set `user_id` to the user's email address (e.g., `user@example.com`) or their raw user UUID directly.
 4.  Execute.
 
 ### Step 5: Query as the Standard User
