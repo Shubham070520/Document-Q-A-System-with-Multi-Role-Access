@@ -2,6 +2,9 @@
 
 An API-only Retrieval-Augmented Generation (RAG) system with role-based document isolation, asynchronous file ingestion, peer-to-peer sharing, rate limiting, and cost/hallucination tracking.
 
+> [!NOTE]
+> Since no User Interface (UI) was specified in the [problemstatement.md](file:///d:/Programming/Assignment/docs/problemstatement.md), this project was developed as a pure backend API system. You can explore, call, and test all functional features using the built-in Swagger UI at `http://127.0.0.1:8000/docs`.
+
 ---
 
 ## 🚀 Key Features
