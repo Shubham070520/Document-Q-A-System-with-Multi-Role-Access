@@ -51,7 +51,7 @@ Fill in the configuration parameters in `.env`:
 *   `GROQ_API_KEY`: Groq developer key.
 
 ### 3. Initialize Database Schemas & RLS:
-Open the **Supabase SQL Editor** and execute the contents of [docs/schema_migration.sql](file:///d:/Programming/Assignment/docs/schema_migration.sql). This will set up the target tables, indexes, and custom Row Level Security policies.
+Open the **Supabase SQL Editor** and execute the contents of [docs/schema_migration.sql].This will set up the target tables, indexes, and custom Row Level Security policies.
 
 > [!IMPORTANT]
 > You must run the `docs/schema_migration.sql` script once in the Supabase SQL Editor to set up the tables, functions, and security policies before the server can read and write data. The server does not automatically create tables at startup.
