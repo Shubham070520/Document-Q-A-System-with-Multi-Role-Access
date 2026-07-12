@@ -79,7 +79,7 @@ async def upload_document(
         except Exception as celery_err:
             # Fall back to FastAPI native BackgroundTasks if Redis is down
             background_tasks.add_task(process_document_task, doc_id, file_path, file_ext)
-            message = "Document uploaded successfully and queued via FastAPI background task (Redis fallback)"
+            message = "Document uploaded successfully"
 
 
 
