@@ -6,7 +6,7 @@ This document outlines the detailed system architecture, database schema, Row Le
 
 ## 1. High-Level System Architecture
 
-The application is built on a service-oriented backend utilizing Python's **FastAPI** framework, asynchronous workers via **Celery & Redis**, and **Supabase (PostgreSQL with pgvector)** as the single source of truth for both relational data and vector storage. External intelligence is provided by the **Cohere API** (for text embeddings) and **Groq Cloud API** (for LLM generation).
+The application is built on a service-oriented backend utilizing Python's **FastAPI** framework, asynchronous workers via **Celery & Redis**, and **Supabase (PostgreSQL with pgvector & Supabase Storage)** as the single source of truth for relational data, vector storage, and document binary storage. External intelligence is provided by the **Cohere API** (for text embeddings) and **Groq Cloud API** (for LLM generation).
 
 ### System Topology Diagram
 
@@ -14,7 +14,7 @@ The application is built on a service-oriented backend utilizing Python's **Fast
 graph TD
     Client[Web/Mobile Client] <--> FastAPI[FastAPI Backend]
     FastAPI <--> Redis[(Redis Caching & Queue)]
-    FastAPI <--> Supabase[(Supabase DB / pgvector / Auth)]
+    FastAPI <--> Supabase[(Supabase DB / pgvector / Auth / Storage)]
     
     %% Background Workers
     Redis <--> Celery[Celery Async Workers]
@@ -333,7 +333,7 @@ WITH CHECK (
 
 ## 4. Asynchronous Document Ingestion Pipeline
 
-To support responsive uploads without blocking HTTP connections, document parsing, chunking, and embedding generation are run as background tasks.
+To support responsive uploads without blocking HTTP connections, document parsing, chunking, and embedding generation are run as background tasks. Files are uploaded to Supabase Storage by the backend API and later downloaded by Celery background workers.
 
 ### 4.1 Ingestion Flow Sequence Diagram
 
@@ -343,6 +343,7 @@ sequenceDiagram
     actor Admin
     participant API as FastAPI Backend
     participant DB as Supabase DB
+    participant Storage as Supabase Storage
     participant Redis as Redis Queue
     participant CW as Celery Worker
     participant Cohere as Cohere API
@@ -350,17 +351,23 @@ sequenceDiagram
     Admin->>API: POST /api/v1/documents/upload (File)
     API->>DB: INSERT INTO documents (status='pending')
     DB-->>API: returns document_id
-    API->>Redis: Enqueue ingestion task (document_id, file_path)
+    API->>Storage: Upload raw file (bucket: documents, path: {document_id}_{filename})
+    Storage-->>API: returns upload confirmation
+    API->>Redis: Enqueue ingestion task (document_id, storage_path, file_ext)
     API-->>Admin: HTTP 202 Accepted (document_id)
     
     CW->>Redis: Dequeue task
     CW->>DB: UPDATE documents SET status='processing'
+    CW->>Storage: Download file bytes (storage_path)
+    Storage-->>CW: returns file bytes
+    CW->>CW: Write to temporary file (NamedTemporaryFile)
     CW->>CW: Load file & extract text content (PDF/TXT)
     CW->>CW: Split text into recursive overlapping chunks (~500 chars)
     CW->>Cohere: POST /v1/embed (chunks, model='embed-english-v3.0')
     Cohere-->>CW: returns list of 1024-dimension vectors
     CW->>DB: INSERT INTO document_chunks (embedding, content, page_num)
     CW->>DB: UPDATE documents SET status='completed'
+    CW->>CW: Clean up local temporary file
 ```
 
 ### 4.2 Text Chunking Strategy
@@ -368,6 +375,12 @@ sequenceDiagram
 - **Extractor**: `pdfplumber` / `pypdf`
 - **Chunking Algorithm**: Recursive Character splitting (Target Size: 500 characters, Overlap: 50 characters to prevent loss of context across boundaries).
 - **Embeddings**: Generated using Cohere's `embed-english-v3.0` API with `input_type="search_document"`.
+
+### 4.3 Document Deletion & Storage Cleanup
+When a document is deleted via the API (`DELETE /api/v1/documents/{document_id}`):
+1. The database record in `public.documents` is deleted. RLS restricts this operation to document owners or admins.
+2. PostgreSQL cascades the delete operation to remove associated records in `public.document_chunks` and `public.document_shares`.
+3. The API performs a best-effort cleanup request to Supabase Storage to remove the raw file from the `documents` bucket.
 
 ---
 

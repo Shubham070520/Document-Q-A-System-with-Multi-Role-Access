@@ -163,15 +163,17 @@ This implementation plan details the step-by-step development roadmap for buildi
 ### 5.2 Tasks
 1.  **Configure Celery & Redis**:
     - Write Celery app definition in `app/workers/celery_app.py` pointing to Redis.
-2.  **Refactor Upload Endpoint to Async**:
-    - Modify `POST /api/v1/documents/upload` to store files locally or in Supabase bucket, insert a DB row status as `pending`, queue task: `process_document_task.delay(document_id, file_path)`, and immediately return `202 Accepted` with `document_id`.
+2.  **Refactor Upload Endpoint to Async & Storage Integration**:
+    - Modify `POST /api/v1/documents/upload` to insert a database record with status `pending`, upload the file to Supabase Storage (`documents` bucket) as `f"{document_id}_{filename}"`, queue the Celery task `process_document_task.delay(document_id, storage_path, file_ext)`, and return `202 Accepted` with `document_id`.
+    - Modify `DELETE /api/v1/documents/{document_id}` to also perform a best-effort deletion of the corresponding file from the Supabase Storage bucket.
 3.  **Background Parser Task**:
-    - Define `process_document_task` in `app/workers/tasks.py`.
-    - Wrap execution in a `try/except` block:
-      - Set status: `processing`.
-      - Extract, chunk, embed, and write to database.
-      - On success, set status: `completed`.
-      - On failure, set status: `failed` and log trace.
+    - Define `process_document_task` in `app/workers/tasks.py` to download the file from Supabase Storage and write it to a local temporary file using `tempfile.NamedTemporaryFile`.
+    - Wrap execution in a `try/except/finally` block:
+      - Set document status to `processing`.
+      - Extract, chunk, embed, and write chunks to the database (clearing any old chunks first).
+      - On success, set document status to `completed`.
+      - On failure, handle up to 3 Celery retries, then set status to `failed` and log the trace.
+      - Ensure the local temporary file is cleaned up in the `finally` block.
 
 ### 5.3 Verification
 - Upload a larger PDF (~10MB). Verify the upload request returns in <500ms.
