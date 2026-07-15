@@ -22,14 +22,26 @@ def get_supabase_client(token: str = Depends(get_token_header)) -> Client:
         return supabase_admin
     try:
         if settings.supabase_url and settings.supabase_anon_key:
-            return create_client(
+            token_preview = f"{token[:10]}...{token[-10:]}" if len(token) > 20 else token
+            anon_preview = f"{settings.supabase_anon_key[:10]}...{settings.supabase_anon_key[-10:]}" if len(settings.supabase_anon_key) > 20 else settings.supabase_anon_key
+            print(f"[DEBUG] Creating request-scoped Supabase client.")
+            print(f"        SUPABASE_URL: {settings.supabase_url}")
+            print(f"        SUPABASE_ANON_KEY: {anon_preview} (len: {len(settings.supabase_anon_key)})")
+            print(f"        Bearer Token: {token_preview}")
+            
+            client = create_client(
                 settings.supabase_url,
                 settings.supabase_anon_key,
                 options=ClientOptions(headers={"Authorization": f"Bearer {token}"})
             )
+            print("[DEBUG] Request-scoped Supabase client created successfully.")
+            return client
         else:
             raise HTTPException(status_code=503, detail="Supabase configurations missing.")
     except Exception as e:
+        import traceback
+        print(f"[ERROR] Failed to create request client: {e}")
+        traceback.print_exc()
         raise HTTPException(status_code=401, detail=f"Failed to create request client: {str(e)}")
 
 def get_current_user_profile(
