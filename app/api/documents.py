@@ -1,14 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
 from app.api.dependencies import get_current_user_profile, get_current_admin_user, get_supabase_client
 from app.database import supabase_admin
-
 from supabase import Client
-import os
 import uuid
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
+
+STORAGE_BUCKET = "documents"
 
 class ShareRequest(BaseModel):
     document_id: str
@@ -16,15 +16,14 @@ class ShareRequest(BaseModel):
 
 @router.post("/upload", status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
-    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     target_user_id: Optional[str] = Query(None, description="Optional user ID to assign this document to (Admins only)"),
     current_user: Dict[str, Any] = Depends(get_current_admin_user),
     db: Client = Depends(get_supabase_client)
 ):
     """
-    Upload a document and queue it for asynchronous parsing and embedding (Admins only).
-    Saves file locally and delegates processing to Celery workers.
+    Upload a document, store it in Supabase Storage, and queue it for
+    asynchronous parsing and embedding via a Celery worker (Admins only).
     """
     filename = file.filename
     file_ext = filename.split(".")[-1].lower() if "." in filename else ""
@@ -34,12 +33,9 @@ async def upload_document(
             detail="Unsupported file format. Only PDF and TXT are supported."
         )
 
-    # Determine owner user ID: either specified target_user_id or the uploading admin's ID
     owner_id = target_user_id if target_user_id else current_user["id"]
-    
-    # Initialize document ID
     doc_id = str(uuid.uuid4())
-    
+
     try:
         db_res = db.table("documents").insert({
             "id": doc_id,
@@ -47,7 +43,7 @@ async def upload_document(
             "filename": filename,
             "status": "pending"
         }).execute()
-        
+
         if not db_res.data:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -59,48 +55,41 @@ async def upload_document(
             detail=f"Database initialization error: {str(e)}"
         )
 
-    # Create temporary uploads folder
-    temp_dir = os.path.join(os.getcwd(), "temp_uploads")
-    os.makedirs(temp_dir, exist_ok=True)
-    file_path = os.path.join(temp_dir, f"{doc_id}_{filename}")
+    storage_path = f"{doc_id}_{filename}"
 
     try:
-        # Save uploaded file locally for background extraction
-        with open(file_path, "wb") as f:
-            f.write(await file.read())
+        file_bytes = await file.read()
 
-        # Delegate parsing to Celery background task
+        # Upload to Supabase Storage — the worker (separate container) will
+        # fetch it from here rather than relying on local disk.
+        supabase_admin.storage.from_(STORAGE_BUCKET).upload(
+            storage_path,
+            file_bytes,
+            {"content-type": file.content_type or "application/octet-stream"}
+        )
+
         from app.workers.tasks import process_document_task
-        
-        message = "Document uploaded successfully and queued for processing"
-        try:
-            process_document_task.delay(doc_id, file_path, file_ext)
-            message = "Document uploaded successfully and queued via Celery background worker"
-        except Exception as celery_err:
-            # Fall back to FastAPI native BackgroundTasks if Redis is down
-            background_tasks.add_task(process_document_task, doc_id, file_path, file_ext)
-            message = "Document uploaded successfully"
-
-
+        process_document_task.delay(doc_id, storage_path, file_ext)
 
         return {
-            "message": message,
+            "message": "Document uploaded successfully and queued via Celery background worker",
             "document_id": doc_id,
             "filename": filename,
             "status": "pending"
         }
 
     except Exception as e:
-        # Cleanup temp file
-        if os.path.exists(file_path):
-            os.remove(file_path)
-            
-        # Update status to failed
+        # Best-effort cleanup of the Storage object if something failed after upload
+        try:
+            supabase_admin.storage.from_(STORAGE_BUCKET).remove([storage_path])
+        except Exception:
+            pass
+
         try:
             db.table("documents").update({"status": "failed"}).eq("id", doc_id).execute()
         except Exception:
             pass
-            
+
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Ingestion queue failed: {str(e)}"
@@ -111,10 +100,6 @@ async def list_documents(
     current_user: Dict[str, Any] = Depends(get_current_user_profile),
     db: Client = Depends(get_supabase_client)
 ):
-    """
-    List all documents accessible to the current user.
-    Admins see all; Standard users see owned and shared documents (enforced by RLS).
-    """
     try:
         res = db.table("documents").select("*").order("created_at", desc=True).execute()
         return res.data or []
@@ -130,23 +115,26 @@ async def delete_document(
     current_user: Dict[str, Any] = Depends(get_current_user_profile),
     db: Client = Depends(get_supabase_client)
 ):
-    """
-    Delete a document and all its chunks.
-    Permissions are restricted to owners and admins via RLS.
-    """
     try:
-        # RLS restricts this select. If document not owned/admin, this returns empty.
         doc_res = db.table("documents").select("*").eq("id", document_id).execute()
         if not doc_res.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Document not found or access denied"
             )
-            
-        db.table("documents").delete().eq("id", document_id).execute()
-        
 
-        
+        doc = doc_res.data[0]
+        storage_path = f"{document_id}_{doc['filename']}"
+
+        db.table("documents").delete().eq("id", document_id).execute()
+
+        # Clean up the underlying file in Storage too — best-effort, don't
+        # fail the whole delete if this errors.
+        try:
+            supabase_admin.storage.from_(STORAGE_BUCKET).remove([storage_path])
+        except Exception as e_storage:
+            print(f"Warning: failed to remove storage object {storage_path}: {e_storage}")
+
         return {"message": "Document deleted successfully", "document_id": document_id}
     except HTTPException:
         raise
@@ -219,9 +207,6 @@ async def share_document(
             "document_id": payload.document_id,
             "shared_with_user_id": target_user_id
         }).execute()
-
-
-
         return {
             "message": f"Document shared successfully with {payload.user_id}",
             "shared_with": target_user_id
